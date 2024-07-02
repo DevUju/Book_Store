@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Store</title>
+    <style>
+        .hidden {
+            display: none;
+        }
+        ul {
+            list-style: none;
+            margin: 0;
+            padding-left: 100px;
+        }
+        h3 {
+            text-align: center;
+            font-size: 50px;
+        }
+        #book-form {
+            padding-left: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h3>An Online Library for Books Tracking</h3>
+    <form id="book-form">
+        <label for="name">New Book:</label>
+        <input type="text" name="name" id="name" placeholder="Name of Book">
+        <button type="submit">Enter</button>
+    </form>
+    <div id="error" class="hidden">
+        An error occurred, please try again.
+    </div>
+    <ul id="BookList">
+        {% for d in data %}
+        <li>
+            <input class="book_completed" data-id="{{ d.id }}" name="finished" id="finished" type="checkbox" {% if d.finished %} checked {% endif %}>
+            {{ d.name }}
+        </li>
+        {% endfor %}
+    </ul>
+
+    <script>
+        document.getElementById("book-form").onsubmit=function (e) {
+            e.preventDefault();
+
+            fetch("/add/book", {
+                method: "POST",
+                body: JSON.stringify({
+                    name: document.getElementById("name").value,
+                }),
+                headers: {
+                    "Content-Type": "application/json"
+                }
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(jsonResponse) {
+                const liItem = document.createElement("Li");
+                liItem.innerHTML = jsonResponse["name"];
+                document.getElementById("BookList").appendChild(liItem);
+                document.getElementById('error').className = 'hidden';
+                window.location.reload(true);
+            })
+            .catch(function () {
+                document.getElementById('error').className = '';
+            })
+        }
+
+        const listCheckboxes = document.querySelectorAll(".book_completed");
+        for (let i = 0; i < listCheckboxes.length; i++) {
+            const checkbox = listCheckboxes[i];
+            checkbox.onchange = function (e) {
+                if (e.target.checked) {
+                    const finished_book = e.target.checked;
+                    const bookId = e.target.dataset.id;
+                    fetch("/finished/" + bookId + "/book", {
+                        method: "POST",
+                        body: JSON.stringify ({
+                            "finished": finished_book
+                        }),
+                        headers: {
+                            "Content-Type": "application/json"
+                        }
+                    })
+                    // .then(function (jsonResponse) {
+                    //     document.getElementById("error").className = "hidden";
+                    // })
+                    .then(function(jsonResponse) {
+                        if (jsonResponse.success) {
+                            console.log('Checkbox state updated successfully!');
+                        } else {
+                            console.log('Error updating checkbox state');
+                        }
+                        })
+
+                    .catch(function () {
+                        document.getElementById("error").className = "";
+                    })
+                }
+            }
+        }
+    </script>
+</body>
+</html>
