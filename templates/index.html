@@ -35,7 +35,7 @@
     <ul id="BookList">
         {% for d in data %}
         <li>
-            <input class="book_completed" data-id="{{ d.id }}" name="finished" id="finished" type="checkbox" {% if d.finished %} checked {% endif %}>
+            <input class="book_completed" data-id="{{ d.id }}" name="finished" id="finished-{{ d.id }}" type="checkbox" {% if d.finished %} checked {% endif %}>
             {{ d.name }}
         </li>
         {% endfor %}
@@ -72,36 +72,30 @@
         const listCheckboxes = document.querySelectorAll(".book_completed");
         for (let i = 0; i < listCheckboxes.length; i++) {
             const checkbox = listCheckboxes[i];
+
             checkbox.onchange = function (e) {
                 if (e.target.checked) {
                     const finished_book = e.target.checked;
                     const bookId = e.target.dataset.id;
+
                     fetch("/finished/" + bookId + "/book", {
                         method: "POST",
-                        body: JSON.stringify ({
-                            "finished": finished_book
+                        body: JSON.stringify({ 
+                            "finished": finished_book 
                         }),
-                        headers: {
-                            "Content-Type": "application/json"
-                        }
-                    })
-                    // .then(function (jsonResponse) {
-                    //     document.getElementById("error").className = "hidden";
-                    // })
-                    .then(function(jsonResponse) {
-                        if (jsonResponse.success) {
-                            console.log('Checkbox state updated successfully!');
-                        } else {
-                            console.log('Error updating checkbox state');
-                        }
+                        headers: { 
+                            "Content-Type": "application/json" 
+                            }
                         })
-
-                    .catch(function () {
-                        document.getElementById("error").className = "";
-                    })
-                }
+                .then(function (jsonResponse) {
+                    document.getElementById('error').className = 'hidden';
+                })
+                .catch(function () {
+                    document.getElementById('error').className = '';
+                })
             }
         }
+    }
     </script>
 </body>
 </html>
