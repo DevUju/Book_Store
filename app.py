@@ -1,13 +1,14 @@
-from flask import Flask, render_template, request, jsonify, abort, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, create_refresh_token
 from flask_bcrypt import Bcrypt
 from sqlalchemy.exc import IntegrityError
 from datetime import timedelta
 from dotenv import load_dotenv
 import secrets
 import os
+import datetime
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
-expiration = timedelta(minutes=60.0)
+expiration = timedelta(days=30)
 
 if not os.path.isfile('secret_key.txt'):
     secret_key = secrets.token_urlsafe(32)
@@ -30,6 +31,18 @@ else:
 app.config['SECRET_KEY'] = secret_key
 app.config['JWT_SECRET_KEY'] = secret_key
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
+app.config["JWT_REFRESH_TOKEN_EXPIRES"] = expiration
+
+
+# Refresh Token
+@app.route("/refresh", methods=["POST"])
+@jwt_required(refresh=True)
+def refresh_token():
+    current_user = get_jwt_identity()
+    access_token = create_access_token(identity=current_user)
+    return jsonify(access_token=access_token), 200
+
+
 
 # Validate Model
 def validate_model(model):
@@ -44,21 +57,53 @@ def validate_model(model):
         return jsonify({"errors": errors}), 422
     return  jsonify({"message": "User created successfully!"}), 201
 
+# Create librarian_book_author Association Table
+librarian_book_author = db.Table(
+    "library",
+    db.Column("library_user_id", db.Integer, db.ForeignKey("library_user_table.id")),
+    db.Column("book_id", db.Integer, db.ForeignKey("book_table.id")),
+    db.Column("author_id", db.Integer, db.ForeignKey("author_table.id"))
+)
+
 # Create a Librarian Model
-class Librarian(db.Model):
-    __tablename__ = "librarian_table"
+class Library_User(db.Model):
+    __tablename__ = "library_user_table"
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(), nullable=False, unique=True)
     first_name = db.Column(db.String(), nullable=False)
     last_name = db.Column(db.String(), nullable=False)
-    email = db.Column(db.String(), nullable=False)
+    email = db.Column(db.String(), nullable=False, unique=True)
     password = db.Column(db.String(), nullable=False)
+
+    book = db.relationship("Book", secondary="librarian_book_author", backref=db.backref('library_user', lazy=True))
+    author = db.relationship("Author", secondary="librarian_book_author", backref=db.backref('library_user', lazy=True))
 
     def __repr__(self):
         return f"iD: {self.id}. Name: {self.first_name} {self.last_name}"
+    
+# Create Book Model
+class Book(db.Model):
+    __tablename__ = "book_table"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.utcnow())
+    
+    def __repr__(self):
+        return f"Book's Details: {self.id}. {self.name}"
+
+# Create Author Model
+class Author(db.Model):
+    __tablename__ = "author_table"
+    id = db.Column(db.Integer, primary_key=True)
+    first_name = db.Column(db.String(), nullable=False)
+    last_name = db.Column(db.String(), nullable=False)
+
+    def __repr__(self):
+        return f"Author's Details: {self.id}. {self.first_name} {self.last_name}"
+
 
 #Implement User Registration
-@app.route("/user/register", methods=["PoST"])
+@app.route("/user/register", methods=["POST"])
 def user_register():
     try:
         data = request.get_json()
@@ -67,10 +112,19 @@ def user_register():
         l_name = data["last_name"]
         user_email = data["email"]
         user_password = data["password"]
+        
+        # Check if username or email already exists
+        existing_user = Library_User.query.filter((Library_User.username == u_name) | (Library_User.email == user_email)).first()
+        if existing_user:
+            return jsonify({
+                "message": "Username or email already exists", 
+                "status": "Bad request", 
+                "statusCode": 401})
+
 
         hashed_password = bcrypt.generate_password_hash(user_password).decode("utf-8")
 
-        library_user = Librarian(
+        library_user = Library_User(
             username = u_name,
             first_name = f_name,
             last_name = l_name,
@@ -79,7 +133,6 @@ def user_register():
         )
 
         validate_model(library_user)
-
         db.session.add(library_user)
         db.session.commit()
 
@@ -108,17 +161,19 @@ def user_login():
         data = request.get_json()
         username = data["username"]
         password = data["password"]
-        user = Librarian.query.filter_by(username=username).first()
+        user = Library_User.query.filter_by(username=username).first()
 
         if user is None:
             return jsonify({"status": "Bad request", "message": "User not found", "statusCode": 404}), 404
         if bcrypt.check_password_hash(user.password, password):
-            access_token = create_access_token(identity=username, expires_delta=expiration)
+            access_token = create_access_token(identity=username)
+            refresh_token = create_refresh_token(identity=username)
             return jsonify({
                 "Status": "Success",
                 "Message": "Login Successful",
                 "data": {
                     "Access_Token": access_token,
+                    "Refresh_Token": refresh_token,
                     "librarian": {
                         "id": user.id,
                         "username": user.username,
@@ -134,109 +189,39 @@ def user_login():
                         "status": "Bad request", 
                         "message": "Authentication failed", 
                         "statusCode": 401})
+
+
+@app.route("/add/book/library", methods=["POST"])
+@jwt_required(refresh=True)
+def add_book():
+    try:
+        data = request.get_json()
+        book_name = data["name"]
+        author_first_name = data["first_name"]
+        author_last_name = data["last_name"]
+        library_user_id = data["id"]
+
+        author = Author(first_name=author_first_name, last_name=author_last_name)
+        book = Book(name=book_name)
+        library_user = Library_User.query.get(library_user_id)
+
+        if library_user:
+            library_user.book.append(book)
+            library_user.author.append(author)
+            db.session.add_all([author, book, library_user])
+            db.session.commit()
+
+            return jsonify({"message": "Book, author, and library user association added successfully"}), 200
+        else:
+            return jsonify({"message": "Invalid library user"}), 400
+    except:
+        return jsonify({"message": "Failed to add book, author, and library user association"}), 400
+
+
+
                     
-
-
-# book_author = db.Table(
-#     "book_author",
-#     db.Column("book_id", db.Integer, db.ForeignKey("Book_List.id")),
-#     db.Column("author_id", db.ForeignKey("author.id"))
-# )
-
-# class Author(db.Model):
-#     __tablename__ = "author"
-#     id = db.Column(db.Integer, primary_key=True)
-#     first_name = db.Column(db.String(), nullable=False)
-#     last_name = db.Column(db.String(), nullable=False)
-
-#     def __repr__(self):
-#         return f"Author's Details: {self.id}. {self.first_name} {self.last_name}"
-
-# class Book(db.Model):
-#     __tablename__ = "Book_List"
-#     id = db.Column(db.Integer, primary_key=True)
-#     name = db.Column(db.String(), nullable=False, unique=True)
-#     finished = db.Column(db.Boolean, default=False)
-#     author = db.relationship("Author", secondary="book_author", backref=db.backref('books', lazy=True))
-#     def __repr__(self):
-#         return f"Book's Details: {self.id}. {self.name} {self.author}"
-
-# def add_book():
-#     author1_first_name = input("Enter first name of author 1: ")
-#     author1_last_name = input("Enter last name of author 1: ")
-#     author2_first_name = input("Enter first name of author 2: ")
-#     author2_last_name = input("Enter last name of author 2: ")
-#     author3_first_name = input("Enter first name of author 3: ")
-#     author3_last_name = input("Enter last name of author 3: ")
-
-#     book1_name = input("Enter title of book 1: ")
-#     book2_name = input("Enter title of book 2: ")
-#     book3_name = input("Enter title of book 3: ")
-
-#     author1 = Author(first_name=author1_first_name, last_name=author1_last_name)
-#     author2 = Author(first_name=author2_first_name, last_name=author2_last_name)
-#     author3 = Author(first_name=author3_first_name, last_name=author3_last_name)
-#     book1 = Book(name=book1_name)
-#     book2 = Book(name=book2_name)
-#     book3 = Book(name=book3_name)
-
-#     book1.author.append(author1)
-#     book1.author.append(author2)
-#     book1.author.append(author3)
-#     book2.author.append(author1)
-#     book2.author.append(author2)
-#     book2.author.append(author3)
-#     book3.author.append(author1)
-#     book3.author.append(author2)
-#     book3.author.append(author3)
-
-    
-#     db.session.add_all([book1, book2, book3])
-#     db.session.commit()
-
 with app.app_context():
-    # add_book()
-    db.create_all()
-
-# @app.route("/")
-# def index():
-#     return render_template("index.html", data=Book.query.all())
-
-# @app.route("/add/book", methods=["POST"])
-# def add_book():
-#     error = False
-#     try:
-#         name = request.get_json()["name"]
-#         newBook = Book(name=name)
-#         db.session.add(newBook)
-#         db.session.commit()
-#     except:
-#         error = True
-#         db.session.rollback()
-#         print(sys.exc_info())
-#     finally:
-#         if error:
-#             abort(400)
-#         else:
-#             db.session.add(newBook)
-#             return jsonify(newBook.to_dict())
-
-# @app.route("/finished/<int:bookId>/book", methods=['POST'])
-# def finished_book(bookId):
-#     try:
-#         finished = request.get_json["finished"]
-#         book = Book.query.get(bookId)
-#         if book is None:
-#             abort(404)
-#         db.session.commit()
-#         return redirect(url_for("index", checkbox_state=finished))
-#     except:
-#         db.session.rollback()
-#     finally:
-#         db.session.close()
-#     return "Book update failed"
-
-        
+    db.create_all()       
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=4000)
