@@ -20,28 +20,12 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 expiration = timedelta(days=30)
 
-if not os.path.isfile('secret_key.txt'):
-    secret_key = secrets.token_urlsafe(32)
-    with open('secret_key.txt', 'w') as f:
-        f.write(secret_key)
-else:
-    with open('secret_key.txt', 'r') as f:
-        secret_key = f.read()
+secret_key = os.getenv("SECRET_KEY")
 
 app.config['SECRET_KEY'] = secret_key
 app.config['JWT_SECRET_KEY'] = secret_key
 app.config['JWT_TOKEN_LOCATION'] = ['headers']
 app.config["JWT_REFRESH_TOKEN_EXPIRES"] = expiration
-
-
-# Refresh Token
-@app.route("/refresh", methods=["POST"])
-@jwt_required(refresh=True)
-def refresh_token():
-    current_user = get_jwt_identity()
-    access_token = create_access_token(identity=current_user)
-    return jsonify(access_token=access_token), 200
-
 
 
 # Validate Model
@@ -166,7 +150,7 @@ def user_login():
         if user is None:
             return jsonify({"status": "Bad request", "message": "User not found", "statusCode": 404}), 404
         if bcrypt.check_password_hash(user.password, password):
-            access_token = create_access_token(identity=username)
+            access_token = create_access_token(identity=username, expires_delta=expiration)
             refresh_token = create_refresh_token(identity=username)
             return jsonify({
                 "Status": "Success",
@@ -190,6 +174,13 @@ def user_login():
                         "message": "Authentication failed", 
                         "statusCode": 401})
 
+# Refresh Token
+@app.route("/refresh", methods=["POST"])
+@jwt_required(refresh=True)
+def refresh_token():
+    current_user = get_jwt_identity()
+    access_token = create_access_token(identity=current_user)
+    return jsonify(access_token=access_token), 200
 
 @app.route("/add/book/library", methods=["POST"])
 @jwt_required(refresh=True)
