@@ -1,4 +1,4 @@
-from models import Library_User, Author, Book
+from models import Library_User, Author, Book, librarian_book_author
 from flask import jsonify, request
 from config import app, db
 from flask_migrate import Migrate
@@ -142,17 +142,24 @@ def add_book():
         book = Book(name=book_name)
         library_user = Library_User.query.get(library_user_id)
 
+        db.session.add(author)
+        db.session.add(book)
+        db.session.commit()
+
         if library_user:
+            # This particular line of code is attacjing the library_user twice in the association table. I am still trying to figure it out. 
             library_user.book.append(book)
             library_user.author.append(author)
-            db.session.add_all([author, book, library_user])
+            
             db.session.commit()
 
             return jsonify({"message": "Book, author, and library user association added successfully"}), 200
         else:
             return jsonify({"message": "Invalid library user"}), 400
-    except:
-        return jsonify({"Message": "Failed to add book, author, and library user association"}), 400
+    except Exception as e:
+        print(f"Error: {str(e)}")  
+        return jsonify({"Message": f"Failed to add book, author, and library user association. Error: {str(e)}"}), 400
+    
 
 with app.app_context():
     db.create_all()       

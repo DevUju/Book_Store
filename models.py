@@ -1,7 +1,6 @@
 from config import db
 import datetime
 
-# Create librarian_book_author Association Table
 librarian_book_author = db.Table(
     "librarian_book_author",  
     db.Column("library_user_id", db.Integer, db.ForeignKey("library_user_table.id")),
@@ -9,7 +8,6 @@ librarian_book_author = db.Table(
     db.Column("author_id", db.Integer, db.ForeignKey("author_table.id"))
 )
 
-# Create a Library_User Model
 class Library_User(db.Model):
     __tablename__ = "library_user_table"
     id = db.Column(db.Integer, primary_key=True)
@@ -19,13 +17,13 @@ class Library_User(db.Model):
     email = db.Column(db.String(), nullable=False, unique=True)
     password = db.Column(db.String(), nullable=False)
 
-    books = db.relationship("Book", secondary="librarian_book_author", backref=db.backref('library_users', lazy=True))
-    authors = db.relationship("Author", secondary="librarian_book_author", backref=db.backref('library_users', lazy=True))
+    book = db.relationship("Book", secondary="librarian_book_author", backref=db.backref('library_user', lazy=True))
+    author = db.relationship("Author", secondary="librarian_book_author", backref=db.backref('library_user', lazy=True))
 
     def __repr__(self):
         return f"ID: {self.id}. Name: {self.first_name} {self.last_name}"
     
-# Create Book Model
+
 class Book(db.Model):
     __tablename__ = "book_table"
     id = db.Column(db.Integer, primary_key=True)
@@ -35,7 +33,7 @@ class Book(db.Model):
     def __repr__(self):
         return f"Book's Details: {self.id}. {self.name}"
 
-# Create Author Model
+
 class Author(db.Model):
     __tablename__ = "author_table"
     id = db.Column(db.Integer, primary_key=True)
